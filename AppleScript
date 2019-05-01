@@ -1,0 +1,2047 @@
+-- All2MP3.AppleScript 
+-- All2MP3 
+
+--  Created by TresRRR on 14/06/09. 
+--  Copyright 2009 TresRRR. All rights reserved. 
+
+property extension_list : {"wv", "wma", "ogg", "mpc", "flac", "ape", "aiff", "aif", "wav"}
+
+global Comando_LS, counter, log_file, mail_path, Contenido, Paths, theDataSource, max_Letras_files, max_Letras_path, ffmpeg_work, MP3_work, theItem_name, theItem, this_item, this_path, Borrando, Scali, num_rest_trab, thePID, num_trans, go_work, Cancion_a_trans, no_borrar, Mi_MP3, Mi_WAV, stado_Q
+
+global ruta_libreria, Trash_, ffmpeg_, mp3splt, mp3splt_no, mp3splt_, segundos_total, B_Tiger, B_Leopard, porcentage_total, wma_advice
+
+global Indicador_1, Indicador_2, Indicador_3, Cancelando, Row_Drag, targetDataRow, rowNumbers_, tableColumn_
+
+--Control general-----------------------------------------------------------------------
+
+on «event appSidle» theObject
+	limpia_imagen()
+	
+	if go_work is true then
+		if Cancelando then
+			try
+				set thePID to ""
+				set i to 0
+				repeat until thePID is not equal to "" or i = 3
+					set thePID to do shell script "ps acx |grep -i " & "'ffmpeg'" & " | awk {'print $1'}" as string
+					set i to i + 1
+					delay 0.5
+				end repeat
+				if thePID is not equal to "" then
+					do shell script "kill " & thePID
+				end if
+			end try
+			
+			Reseteame()
+		else
+			if B_Tiger then
+				control_tiempos()
+				
+				try
+					set thePID to do shell script "ps cax | grep -i ffmpeg | grep -v grep | cut -c 1-6"
+				end try
+				
+				if thePID is "" then
+					if ((count of Paths) - num_trans) ≥ 0 then
+						set porcentage_total to porcentage_total + 100
+						working()
+						
+						repeat until ffmpeg_work is false
+						end repeat
+					else
+						if Borrando is true then
+							Borrar(Paths)
+						end if
+						repeat until Reseteame()
+						end repeat
+					end if
+				end if
+			else
+				try
+					set thePID to do shell script "ps acx | grep -i ffmpeg | awk {'print $1'}" as string
+					control_tiempos()
+					
+					if thePID is "" then
+						if ((count of Paths) - num_trans) ≥ 0 then
+							set porcentage_total to porcentage_total + 100
+							working()
+							
+							repeat until ffmpeg_work is false
+							end repeat
+						else
+							if Borrando is true then
+								Borrar(Paths)
+							end if
+							
+							repeat until Reseteame()
+							end repeat
+						end if
+					end if
+				end try
+			end if
+		end if
+	end if
+	
+	return true
+end «event appSidle»
+
+--Funcion de control de tiempos -------------------------------------------------
+
+on control_tiempos()
+	delay 0.1
+	
+	set progress to do shell script ("cat " & log_file) as string
+	
+	set AppleScript's text item delimiters to "Input"
+	set input_info to the second text item of (progress)
+	set AppleScript's text item delimiters to "Output"
+	set input_info to the first text item of (input_info)
+	set AppleScript's text item delimiters to "Audio: "
+	set input_info to the last text item of (input_info)
+	set AppleScript's text item delimiters to ","
+	set input_info to the first text item of (input_info)
+	
+	if input_info contains "0x" then
+		if input_info contains "0x0163" then
+			«event panSdisP» window "wma_Error" given «class attT»:window "main"
+		else
+			«event panSdlog» "Unknow file format" given «class attT»:window "main"
+		end if
+	else if input_info contains "Unknow file format" then
+		«event panSdlog» "Unknow file format" given «class attT»:window "main"
+	else if input_info contains "Error while decoding" then
+		«event panSdlog» "Error while decoding.
+- The MP3 may be boken." given «class attT»:window "main"
+	else
+		if progress contains "video:0kB" or progress contains "muxing overhead" then
+			set «class indR» of «class proI» "Timer_1" of window "main" to true
+		else
+			if segundos_total is "NA" then
+				set «class indR» of «class proI» "Timer_1" of window "main" to true
+				set «class indR» of «class proI» "Timer_2" of window "main" to true
+			else
+				set AppleScript's text item delimiters to " time="
+				try
+					set segundosTranscurridos to the last text item of (progress)
+					
+					if segundosTranscurridos contains "bitrate" then
+						set AppleScript's text item delimiters to " bitrate="
+						if B_Tiger then
+							try
+								set segundosTranscurridos to cambia_caracter(the first text item of (segundosTranscurridos), ".", ",") as real
+								set porcentage to (segundosTranscurridos / segundos_total as real) * 100 as real
+							end try
+						else
+							set segundosTranscurridos to (the first text item of (segundosTranscurridos)) as integer
+							if B_Leopard then
+								set porcentage to (segundosTranscurridos / segundos_total) * 100
+							else
+								set porcentage to (segundosTranscurridos / segundos_total)
+							end if
+							
+							set «class conT» of «class proI» "Timer_1" of window "main" to 0
+							set «class conT» of «class proI» "Timer_2" of window "main" to 0
+						end if
+						
+						set «class indR» of «class proI» "Timer_1" of window "main" to false
+						set «class conT» of «class proI» "Timer_1" of window "main" to porcentage
+						set «class conT» of «class proI» "Timer_2" of window "main" to porcentage_total + porcentage
+					else
+						set «class indR» of «class proI» "Timer_1" of window "main" to true
+					end if
+				end try
+			end if
+		end if
+	end if
+end control_tiempos
+
+--Inicializacion ---------------------------------------------------------------
+
+on «event appSawFN» theObject
+	set log_file to getQuotedForm((POSIX path of (path to me) as string) & "Contents/Resources/All2MP3.log") as string
+	set ffmpeg_ to getQuotedForm((POSIX path of (path to me) as string) & "Contents/Resources/bin/ffmpeg")
+	set ruta_libreria to POSIX path of (path to library folder)
+	set Trash_ to quoted form of ((POSIX path of (path to current user folder) as string) & ".Trash")
+	
+	set Comando_LS to ""
+	
+	set porcentage_total to 0
+	set wma_advice to false
+	
+	set ffmpeg_work to false
+	set Contenido to false
+	set Cancelando to false
+	set Borrando to false
+	set no_borrar to true
+	set go_work to false
+	set Row_Drag to false
+	set mp3splt to false
+	set mp3splt_no to false
+	set segundos_total to ""
+	
+	set Paths to {} as list
+	
+	set num_trans to 1
+	set max_Letras_files to 0
+	set max_Letras_path to 0
+	set counter to 0
+	set Scali to 320
+	set B_Tiger to false
+	set B_Leopard to false
+	
+	set num_rest_trab to integer
+	
+	set stado_Q to "min"
+	
+	set Mi_WAV to ""
+	set Mi_MP3 to ""
+	set Indicador_1 to ""
+	set Indicador_2 to ""
+	set Indicador_3 to ""
+	set Cancion_a_trans to ""
+	set app_working to ""
+	set targetDataRow to ""
+	set rowNumbers_ to ""
+	
+	tell theObject to «event appSregI» given «class draT»:{"rows", "file names"}
+	
+	set theDataSource to make new «class datS» at end of every «class datS» with properties {name:"Files"}
+	
+	set «class datS» of «class tabW» "files" of «class scrV» "Files" of window "main" to theDataSource
+	
+	tell «class tabW» "files" of «class scrV» "files" of window "main" to «event appSregI» given «class draT»:{"file names"}
+	
+	return true
+end «event appSawFN»
+
+--Al cargar datos desde droplet o "open with" -----------------------------------------
+
+on open the_items
+	if go_work is false then
+		try
+			set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "main"
+			set «class updV» of theDataSource to false
+			
+			set Bandera to false
+			set draget to {}
+			set Contenido to false
+			
+			repeat with i from 1 to count of the_items
+				set item_info to info for (item i of the_items)
+				
+				set the_item to (item i of the_items) as string
+				
+				set AppleScript's text item delimiters to "."
+				set this_filetype to the last text item of the_item
+				set the_item to unixpath(POSIX path of the_item)
+				
+				do shell script ffmpeg_ & " -i" & " " & the_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+				set Log_text to result
+				
+				if Log_text contains "Audio: " and folder of item_info is false and this_filetype is not "mp3" then
+					if Log_text contains "Video:" then Show_drawer()
+					if this_filetype is "wma" then set Bandera to true
+					set draget to draget & ((POSIX file (un_unixpath(the_item))) as file specification)
+					set Contenido to true
+				else
+					if this_filetype is in extension_list then
+						«event panSdlog» (the_item as string) & "
+-Unknown format / Corrupt" given «class attT»:window "main"
+					end if
+				end if
+			end repeat
+			
+		on error el_error
+			«event panSdlog» "ERROR CODE: 300 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+		
+		if Bandera is true and wma_advice is false then
+			«event panSdisP» window "wma_advertice" given «class attT»:window "main"
+			set wma_advice to true
+		end if
+		
+		if Contenido is true then
+			if visible of «class imaV» "Drop_here" of window "main" is true then
+				set visible of «class imaV» "Drop_here" of window "main" to false
+			end if
+			CargaDatos(draget, theDataSource)
+		end if
+	end if
+	
+	return true
+end open
+
+--Al cargar datos desde "Drag & Drop"-------------------------------------------------
+
+on «event daVSprTD» theObject given «class draR»:dragRows, «class pasE»:thePasteboard
+	set «class preQ» of thePasteboard to "rows"
+	set «class conT» of thePasteboard to dragRows
+	
+	set «class sorR» of theDataSource to false
+	return true
+end «event daVSprTD»
+
+on «event daVSprTR» theObject given «class draI»:dragInfo, «class droO»:dropOperation, «class rowO»:theRow
+	try
+		set dragOperation to «constant EDaOnoDO»
+		set dataTypes to «class typP» of «class pasE» of dragInfo
+		
+		if "rows" is in dataTypes then
+			set Row_Drag to false
+			
+			if dropOperation is 1 then
+				
+				if «class opKD» of «class eveE» 1 then
+					set dragOperation to «constant EDaOcoDO»
+				else
+					set dragOperation to «constant EDaOmoDO»
+				end if
+			end if
+		else if "file names" is in dataTypes then
+			set Row_Drag to true
+			
+			if dropOperation is 1 then
+				set dragOperation to «constant EDaOcoDO»
+			end if
+		end if
+	on error el_error
+		«event panSdlog» "ERROR CODE: 400 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+	return dragOperation
+end «event daVSprTR»
+
+on «event daVSacTD» theObject given «class draI»:dragInfo, «class droO»:dropOperation, «class rowO»:theRow
+	try
+		set dataTypes to «class typP» of «class pasE» of dragInfo
+		
+		set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "main"
+		set «class updV» of theDataSource to false
+		
+		if theRow < (count of every «class datR» of theDataSource) then
+			set targetDataRow to «class datR» theRow of theDataSource
+		else
+			set targetDataRow to missing value
+		end if
+		
+		set rowNumbers to contents of «class pasE» of dragInfo
+		set rowNumbers_ to theRow
+		
+		if "rows" is in dataTypes then
+			-- Get the list of row numbers
+			set «class preQ» of «class pasE» of dragInfo to "rows"
+			
+			-- We'll make a temporary list of the dragged data rows
+			set dataRows to {}
+			repeat with i in rowNumbers
+				copy «class datR» i of theDataSource to end of dataRows
+			end repeat
+			
+			-- Now move or duplicate the data rows based on the option key								--<<<<<<<<---CREO QUE EN ESTO ESTA LA SOLUCION!!!
+			--<<<<<<<<---MOVER LOS REGISTROS ARRIVA O ABAJO PARA ORDENARLOS
+			repeat with i in dataRows
+				if targetDataRow is not missing value then
+					move i to before targetDataRow
+				else
+					move i to end of every «class datR» of theDataSource
+				end if
+			end repeat
+			set «class updV» of theDataSource to true
+		else if "file names" is in dataTypes then
+			
+			-- We want the data as a list of file names, so set the preferred type to "file names"
+			set «class preQ» of «class pasE» of dragInfo to "file names"
+			
+			-- Get the list of files from the pasteboard
+			set contenidos to contents of «class pasE» of dragInfo
+			
+			-- Make sure we have at least one item
+			
+			set Bandera to false
+			set draget to {}
+			set Contenido to false
+			
+			repeat with num in contenidos
+				set AppleScript's text item delimiters to "."
+				set this_filetype to the last text item of (num as string)
+				set the_iteminfo to info for (num as POSIX file)
+				
+				set this_item to unixpath(POSIX path of num)
+				do shell script ffmpeg_ & " -i" & " " & this_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+				set Log_text to result
+				
+				if Log_text contains "Audio: " and folder of the_iteminfo is false and this_filetype is not "mp3" then
+					if Log_text contains "Video:" then Show_drawer()
+					if this_filetype is "wma" then set Bandera to true
+					set draget to draget & ((POSIX file num) as file specification)
+					set Contenido to true
+				else
+					if this_filetype is in extension_list then
+						«event panSdlog» (num as string) & "
+-Unknown format / Corrupt" given «class attT»:window "main"
+					end if
+				end if
+			end repeat
+			
+			
+			if Bandera is true and wma_advice is false then
+				«event panSdisP» window "wma_advertice" given «class attT»:window "main"
+				set wma_advice to true
+			end if
+			
+			if Contenido is true then
+				if visible of «class imaV» "Drop_here" of window "main" is true then
+					set visible of «class imaV» "Drop_here" of window "main" to false
+				end if
+				CargaDatos(draget, theDataSource)
+				
+				Ord_Data()
+			end if
+		end if
+		
+		set contenidos to contents of «class pasE» of dragInfo
+		
+		set draget to {}
+		set Contenido to false
+		
+	on error el_error
+		«event panSdlog» "ERROR CODE: 500 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+	return true
+end «event daVSacTD»
+
+on «event drADdroR» theObject given «class draI»:dragInfo
+	try
+		set «class preQ» of «class pasE» of dragInfo to "file names"
+		set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "main"
+		set «class updV» of theDataSource to false
+		set contenidos to contents of «class pasE» of dragInfo
+		
+		set Bandera to false
+		set draget to {}
+		set Contenido to false
+		
+		repeat with num in contenidos
+			set AppleScript's text item delimiters to "."
+			set this_filetype to the last text item of (num as string)
+			set the_iteminfo to info for (num as POSIX file)
+			
+			set this_item to unixpath(POSIX path of num)
+			do shell script ffmpeg_ & " -i" & " " & this_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+			set Log_text to result
+			
+			if Log_text contains "Audio: " and folder of the_iteminfo is false and this_filetype is not "mp3" then
+				if Log_text contains "Video:" then Show_drawer()
+				if this_filetype is "wma" then set Bandera to true
+				set draget to draget & ((POSIX file num) as file specification)
+				set Contenido to true
+			else
+				if this_filetype is in extension_list then
+					«event panSdlog» (num as string) & "
+-Unknown format / Corrupt" given «class attT»:window "main"
+				end if
+			end if
+		end repeat
+		
+	on error el_error
+		«event panSdlog» "ERROR CODE: 600 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+	
+	if Bandera is true and wma_advice is false then
+		«event panSdisP» window "wma_advertice" given «class attT»:window "main"
+		set wma_advice to true
+	end if
+	
+	if Contenido is true then
+		if visible of «class imaV» "Drop_here" of window "main" is true then
+			set visible of «class imaV» "Drop_here" of window "main" to false
+		end if
+		CargaDatos(draget, theDataSource)
+	end if
+	
+	return true
+end «event drADdroR»
+
+on Show_drawer()
+	set currentState to «class staB» of «class draA» "drawer" of window "main"
+	
+	if currentState is equal to «constant EDrEdrCS» or currentState is equal to «constant EDrEdrCT» then
+		tell «class draA» "drawer" of window "main" to «event caVSopeD» given «class on O»:«constant EReTbotE»
+	end if
+end Show_drawer
+
+on Hide_Drawer()
+	set currentState to «class staB» of «class draA» "drawer" of window "main"
+	
+	if currentState is equal to «constant EDrEdrOT» or currentState is equal to «constant EDrEdrCT» then
+		tell «class draA» "drawer" of window "main" to «event caVScloD»
+		return true
+	end if
+	return false
+end Hide_Drawer
+
+on limpia_imagen()
+	delete «class imaA» of «class imaV» "Zona_drop" of window "main"
+end limpia_imagen
+
+on «event daVScolC» theObject given «class tabC»:tableColumn
+	set «class updV» of theDataSource to false
+	try
+		if name of tableColumn is "columna_path" or name of tableColumn is "columna_file" then
+			set tableColumn_ to tableColumn
+			set theColumnIdentifier to «class ideT» of tableColumn
+			set «class sorR» of theDataSource to true
+			
+			if name of tableColumn is "columna_file" then set «class sorC» of theDataSource to «class datB» "Files" of theDataSource
+			
+			if name of tableColumn is "columna_path" then set «class sorC» of theDataSource to «class datB» "Path" of theDataSource
+			
+			set theSortColumn to «class sorC» of theDataSource
+			
+			if «class sorO» of theSortColumn is «constant ESoDascN» then
+				set «class sorO» of theSortColumn to «constant ESoDdesE»
+				set ArrowImageIndex to 2
+			else
+				set «class sorO» of theSortColumn to «constant ESoDascN»
+				set ArrowImageIndex to 1
+			end if
+			
+			set ArrowImageList to {loadImage("NSAscendingSortIndicator"), loadImage("NSDescendingSortIndicator")}
+			
+			«event appScalM» "setIndicatorImage:inTableColumn:" given «class psof»:theObject, «class witP»:{item ArrowImageIndex of ArrowImageList, tableColumn}
+			
+			if Ord_Data() is false then
+				--set sorted of theDataSource to false
+			end if
+		end if
+	end try
+	
+	set «class updV» of theDataSource to true
+end «event daVScolC»
+
+on remake_DS(sortedDataRows)
+	set sortedDataRows_ to {}
+	
+	repeat with i in (items of sortedDataRows)
+		copy i to end of sortedDataRows_
+	end repeat
+	
+	repeat with i from 1 to (count items of sortedDataRows_)
+		set j to i
+		set ID_Row to id of item i of sortedDataRows_
+		repeat until j is (count of every «class datR» of theDataSource)
+			set theRow to «class datR» j of theDataSource
+			if id of theRow is ID_Row then
+				move theRow to before «class datR» i of theDataSource
+				exit repeat
+			else
+				move theRow to end of every «class datR» of theDataSource
+				set j to j - 1
+			end if
+			
+			set j to j + 1
+		end repeat
+	end repeat
+end remake_DS
+
+--Funcion para ordenar los datos segun la tabla------------------------------------------
+
+on Ord_Data()
+	try
+		set counter to 1
+		set to_carga_datos to {}
+		set Temp_Paths to {}
+		set AppleScript's text item delimiters to "|"
+		
+		if «class sorR» of theDataSource then
+			set «class updV» of theDataSource to false
+			tell window "main" to «event appSfupd»
+			set sortedDataRows to «class soDR» of theDataSource
+			
+			remake_DS(sortedDataRows)
+			
+			set y to 1
+			repeat with i in (every «class datR» of theDataSource)
+				set ID_Row to id of i
+				repeat with y from 1 to (count of items of Paths)
+					set the_item to (item y of Paths) as string
+					set item_1 to the first text item of the_item
+					set item_2 to the second text item of the_item
+					set item_3 to (the last text item of the_item) as integer
+					if item_3 is equal to ID_Row then
+						set Temp_Paths to Temp_Paths & {item_1 & "|" & item_2 & "|" & item_3}
+						set y to y + 1
+					end if
+				end repeat
+			end repeat
+		else
+			repeat with i from 1 to (count of every «class datR» of theDataSource)
+				set ID_Row to (id of «class datR» i of theDataSource)
+				repeat with y from 1 to (count of items of Paths)
+					set the_item to (item y of Paths) as string
+					set item_1 to the first text item of the_item
+					set item_2 to the second text item of the_item
+					set item_3 to the last text item of the_item
+					if (item_3 as integer) is equal to ID_Row then
+						set Temp_Paths to Temp_Paths & {item_1 & "|" & item_2 & "|" & item_3}
+					end if
+				end repeat
+			end repeat
+		end if
+		
+		set Paths to Temp_Paths
+	on error el_error
+		return false
+		--display dialog "ERROR CODE: 800 -> " & el_error buttons ["OK"] default button 1 attached to window "main"
+	end try
+	
+	return true
+end Ord_Data
+
+-------------------------------------------------------------------------------------------
+
+on CargaDatos(these_items, theDataSource)
+	try
+		set «class updV» of theDataSource to false
+		
+		repeat with theItem in these_items
+			set AppleScript's text item delimiters to ":"
+			set theItem_name to the last text item of (theItem as string)
+			
+			set theItem to cambia_caracter(theItem as string, ":", "/")
+			
+			set Bandera to false
+			
+			if (count of items of Paths) > 0 then
+				repeat with s_item in Paths
+					set AppleScript's text item delimiters to "|"
+					set item_s to the first text item of s_item
+					if theItem is equal to item_s then set Bandera to true
+				end repeat
+			end if
+			
+			if Bandera is false then
+				tell theDataSource
+					make new «class datB» at the end of the every «class datB» with properties {name:"C_Path"}
+					
+					if Row_Drag is false then
+						make new «class datB» at the end of the every «class datB» with properties {name:"Files", «class sorO»:«constant ESoDascN», «class sorT»:«constant ESoTalpB», «class soCS»:«constant EScScasI»}
+						make new «class datB» at the end of the every «class datB» with properties {name:"Path", «class sorO»:«constant ESoDascN», «class sorT»:«constant ESoTalpB», «class soCS»:«constant EScScasI»}
+					else
+						make new «class datB» at the end of the every «class datB» with properties {name:"Files"}
+						make new «class datB» at the end of the every «class datB» with properties {name:"Path"}
+					end if
+				end tell
+				
+				if Row_Drag is false then
+					set «class sorR» of theDataSource to true
+					set «class sorC» of theDataSource to «class datB» "Files" of theDataSource
+				end if
+				
+				set theRow to make new «class datR» at the end of the every «class datR» of theDataSource
+				
+				set the Paths to Paths & {theItem & "|" & cambia_caracter(theItem, theItem_name, "") & "|" & id of theRow}
+				
+				set contents of «class datC» 2 of theRow to theItem_name
+				set contents of «class datC» 3 of theRow to cambia_caracter(theItem, theItem_name, "")
+				
+				set Letras_File to ((count of theItem_name) * 7.2) as integer
+				set Letras_Path to ((count of cambia_caracter(theItem, theItem_name, "")) * 7.2) as integer
+				
+				if max_Letras_files < (Letras_File + 25) then
+					set max_Letras_files to (Letras_File + 25)
+				end if
+				
+				if max_Letras_path < (Letras_Path + 25) then
+					set max_Letras_path to (Letras_Path + 25)
+				end if
+			end if
+		end repeat
+		
+		if Row_Drag then
+			set theRow to count of every «class datR» of theDataSource
+			
+			set DataRow to «class datR» theRow of theDataSource
+			
+			move DataRow to before «class datR» rowNumbers_ of theDataSource
+			
+			set Row_Drag to false
+		end if
+		
+	on error el_error
+		«event panSdlog» "ERROR CODE: 900 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+	
+	Window_Size("max")
+	set «class updV» of theDataSource to true
+	
+	return true
+end CargaDatos
+
+--Control de Clicks ------------------------------------------------------------------
+on «event coVScliI» theObject
+	if name of theObject is "XMail_info" then
+		set xmail_url to "http://code.google.com/p/xmail-osax/"
+		tell application "Finder"
+			open location xmail_url
+		end tell
+	end if
+	
+	if name of theObject is "Desinstall_" then
+		do shell script "mv " & quoted form of ((POSIX path of (path to current user folder) as string) & "Library/Preferences/com.Tresrrr.All2MP3.plist") & " " & Trash_ ¬
+			& "| " & ("osascript -e 'delay 1 
+tell application \"Finder\" to delete (\"" & (get path of «class maiB») & "\" as POSIX file) ' &> /dev/null &") with administrator privileges
+		
+		«event panScloP» (theObject's window)
+		quit
+	end if
+	
+	if name of theObject is "but_send_report" then
+		if «class conT» of «class texF» "From_email" of window "report_pan" is not ¬
+			"" and «class conT» of «class texV» "tell_about" of «class scrV» "tell_about" of window "report_pan" is not "" then
+			set visible of «class proI» "wait_" of window "report_pan" to true
+			«event coVSstaA» «class proI» "wait_" of window "report_pan"
+			delay 0.5
+			tell application "Finder"
+				set version_ to get version of current application
+			end tell
+			tell window "report_pan"
+				set messTo to "all2mp3.report@gmail.com"
+				set messFrom to «class conT» of «class texF» "From_email"
+				set messSub to "All2MP3 " & (version_ as string)
+				set Reporte to "From: " & messFrom & "
+----------------------------
+" & «class conT» of «class texV» "tell_about" of «class scrV» "tell_about" & "
+----------------------------
+" & «class conT» of «class texF» "Sys_ver" & "
+" & «class conT» of «class texF» "CPU_ver" & "
+----------------------------" & "
+" & (do shell script ("cat " & log_file) as string)
+			end tell
+			
+			set messBody to Reporte
+			set theUsername to "all2mp3.report"
+			set thePassword to "6666-7777"
+			set theServer to "smtp.gmail.com"
+			set UseSSL to true
+			set thePort to 587
+			
+			try
+				«event MlSuMlSd» given «class Msdt»:messTo, «class Msdf»:messFrom, «class Msds»:messSub, «class MsdB»:messBody, «class Mstp»:theServer, «class Mlog»:theUsername, «class Mpas»:thePassword, «class MAut»:«constant MEAhMEAl», «class MSsl»:UseSSL, «class MSck»:«constant MESsMEvn», «class MPor»:thePort
+				
+				«event panScloP» (theObject's window)
+				set visible of «class proI» "wait_" of window "report_pan" to false
+				«event coVSstoT» «class proI» "wait_" of window "report_pan"
+				
+				tell window "report_pan"
+					set «class conT» of «class texF» "From_email" to ""
+					set «class conT» of «class texV» "tell_about" of «class scrV» "tell_about" to ""
+					set «class conT» of «class texV» "Log_" of «class scrV» "Log_" to ""
+					set «class conT» of «class texF» "Sys_ver" to ""
+					set «class conT» of «class texF» "CPU_ver" to ""
+				end tell
+			on error el_error
+				«event panSdlog» "Envio de Reporte: " & el_error given «class btns»:["OK"], «class dflt»:1 --attached to window "main"
+				set visible of «class proI» "wait_" of window "report_pan" to false
+				«event coVSstoT» «class proI» "wait_" of window "report_pan"
+			end try
+		else
+			if «class conT» of «class texF» "From_email" of window "report_pan" is "" and ¬
+				«class conT» of «class texV» "tell_about" of «class scrV» "tell_about" of window "report_pan" is "" then
+				
+				set «class bacC» of «class texF» "From_email" of window of theObject to {62708, 0, 8481}
+				set «class bacC» of «class texV» "tell_about" of «class scrV» "tell_about" of window of theObject to {62708, 0, 8481}
+				delay 0.1
+				set «class bacC» of «class texF» "From_email" of window of theObject to {65535, 65535, 65535}
+				set «class bacC» of «class texV» "tell_about" of «class scrV» "tell_about" of window of theObject to {65535, 65535, 65535}
+				
+			else
+				if «class conT» of «class texF» "From_email" of window "report_pan" is "" then
+					
+					set «class bacC» of «class texF» "From_email" of window of theObject to {62708, 0, 8481}
+					delay 0.1
+					set «class bacC» of «class texF» "From_email" of window of theObject to {65535, 65535, 65535}
+					
+				else
+					if «class conT» of «class texV» "tell_about" of «class scrV» "tell_about" of window "report_pan" is "" then
+						
+						set «class bacC» of «class texV» "tell_about" of «class scrV» "tell_about" of window of theObject to {62708, 0, 8481}
+						delay 0.1
+						set «class bacC» of «class texV» "tell_about" of «class scrV» "tell_about" of window of theObject to {65535, 65535, 65535}
+					end if
+				end if
+			end if
+		end if
+	end if
+	
+	if name of theObject is "Cancelar" then
+		«event panScloP» (theObject's window)
+	end if
+	
+	if name of theObject is "Write_error_B" then
+		«event panScloP» (theObject's window)
+		set go_work to false
+	end if
+	
+	if name of theObject is "Sel_All_Path" then
+		set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "Main"
+		set «class updV» of theDataSource to false
+		
+		set nueva_ruta_sel to (choose folder without invisibles)
+		set nueva_ruta_sel to cambia_caracter((nueva_ruta_sel as file specification) as string, ":", "/")
+		
+		repeat with i from 1 to count of Paths
+			set AppleScript's text item delimiters to "|"
+			set the_item to item i of Paths as string
+			set item_1 to the first text item of the_item
+			set item_2 to the second text item of the_item
+			set item_3 to the last text item of the_item
+			
+			set item i of Paths to {}
+			set item i of Paths to {item_1 & "|" & nueva_ruta_sel & "|" & item_3}
+			
+			set the contents of «class datC» 3 of «class datR» i of theDataSource to nueva_ruta_sel
+			
+		end repeat
+		
+		set Letras_Path to ((count of nueva_ruta_sel) * 7.2) as integer
+		if max_Letras_path < (Letras_Path + 25) then
+			set max_Letras_path to (Letras_Path + 25)
+		end if
+		
+		Window_Size("max")
+		
+		set «class updV» of theDataSource to true
+	end if
+	
+	if name of theObject is "Sel_Path" then
+		set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "Main"
+		set tableView to «class tabW» "files" of «class scrV» "files" of window "Main"
+		set «class updV» of theDataSource to false
+		
+		set selectedDataRows to «class seDS» of tableView
+		if (count of selectedDataRows) > 1 then
+			set nueva_ruta_sel to (choose folder without invisibles)
+			set nueva_ruta_sel to cambia_caracter((nueva_ruta_sel as file specification) as string, ":", "/")
+			
+			repeat with i from 1 to count of selectedDataRows
+				set the_row to item i of selectedDataRows
+				repeat with j from 1 to count of Paths
+					set the_item to item j of Paths as string
+					set AppleScript's text item delimiters to "|"
+					set item_1 to the first text item of the_item
+					set item_3 to the last text item of the_item
+					if (item_3 as integer) is equal to (id of the_row) then
+						set item i of Paths to {item_1 & "|" & nueva_ruta_sel & "|" & item_3}
+						set the contents of «class datC» 3 of the_row to nueva_ruta_sel
+					end if
+				end repeat
+			end repeat
+			
+			set Letras_Path to ((count of nueva_ruta_sel) * 7.2) as integer
+			if max_Letras_path < (Letras_Path + 25) then
+				set max_Letras_path to (Letras_Path + 25)
+			end if
+		else
+			set archivo to contents of «class datC» 2 of («class seDR» of «class tabW» "files" of «class scrV» "files" of window "main")
+			set ruta to contents of «class datC» 3 of («class seDR» of «class tabW» "files" of «class scrV» "files" of window "main")
+			
+			set nueva_ruta_sel to (choose folder without invisibles)
+			set nueva_ruta_sel to cambia_caracter((nueva_ruta_sel as file specification) as string, ":", "/")
+			
+			repeat with i from 1 to count of Paths
+				set AppleScript's text item delimiters to "|"
+				set the_item to item i of Paths as string
+				set item_1 to the first text item of the_item
+				set item_2 to the second text item of the_item
+				set item_3 to the last text item of the_item
+				
+				if item_3 is equal to id of («class seDR» of «class tabW» 1 of «class scrV» 1 of window "main") as string then
+					set contents of «class datC» 3 of («class seDR» of «class tabW» 1 of «class scrV» 1 of window "main") to nueva_ruta_sel
+					
+					set item i of Paths to {}
+					set item i of Paths to {item_1 & "|" & nueva_ruta_sel & "|" & item_3}
+					exit repeat
+				end if
+			end repeat
+		end if
+		
+		Window_Size("max")
+		
+		set «class updV» of theDataSource to true
+	end if
+	
+	if name of theObject is "check_trash" then
+		try
+			if Borrando is false then
+				set Borrando to true
+			else
+				set Borrando to false
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1000 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	if name of theObject is "but_trans_R" then
+		try
+			set stado_Q to "max"
+			set {x, y} to size of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main"
+			
+			set visible of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main" to false
+			set visible of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main" to true
+			
+			set «class posn» of «class butT» "but_reset" of «class boxO» "Box_Content" of window "main" to {x + 15, 10}
+			
+			set calidad to «class intV» of «class sliI» "slider_calidad_2" of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main"
+			if calidad is 1 then
+				set Scali to "32"
+			else if calidad is 2 then
+				set Scali to "40"
+			else if calidad is 3 then
+				set Scali to "48"
+			else if calidad is 4 then
+				set Scali to "56"
+			else if calidad is 5 then
+				set Scali to "64"
+			else if calidad is 6 then
+				set Scali to "80"
+			else if calidad is 7 then
+				set Scali to "96"
+			else if calidad is 8 then
+				set Scali to "112"
+			else if calidad is 9 then
+				set Scali to "128"
+			else if calidad is 10 then
+				set Scali to "160"
+			else if calidad is 11 then
+				set Scali to "192"
+			else if calidad is 12 then
+				set Scali to "224"
+			else if calidad is 13 then
+				set Scali to "256"
+			else if calidad is 14 then
+				set Scali to "320"
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1010 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	if name of theObject is "but_trans_G" then
+		try
+			set stado_Q to "min"
+			set {x, y} to size of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main"
+			
+			set visible of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main" to true
+			set visible of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main" to false
+			
+			set «class posn» of «class butT» "but_reset" of «class boxO» "Box_Content" of window "main" to {x + 15, 10}
+			
+			set calidad to «class intV» of «class sliI» "slider_calidad_1" of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main"
+			if calidad is 0 then
+				set Scali to "160"
+			else if calidad is 33 then
+				set Scali to "192"
+			else if calidad is 66 then
+				set Scali to "256"
+			else if calidad is 100 then
+				set Scali to "320"
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1020 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	if name of theObject is "but_cancel" then
+		set Bandera to false
+		set comp_error to ""
+		
+		set Cancelando to true
+		set visible of «class imaV» "working" of window "main" to false
+		set visible of «class imaV» "Cancelando" of window "main" to true
+	end if
+	
+	if name of theObject is "but_reset" then
+		Reseteame()
+	end if
+	
+	if name of theObject is "but_add" or name of theObject is "but_add_front" or name of theObject is "But_Fondo" then
+		
+		set contenidos to (choose file with multiple selections allowed without invisibles)
+		
+		set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "Main"
+		set «class updV» of theDataSource to false
+		
+		set draget to {}
+		set Contenido to false
+		set Bandera to false
+		
+		repeat with num in the contenidos
+			set item_info to info for num
+			
+			set AppleScript's text item delimiters to "."
+			set this_filetype to the last text item of (num as string)
+			
+			set the_item to unixpath(POSIX path of num)
+			do shell script ffmpeg_ & " -i" & " " & the_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+			set Log_text to result
+			
+			if Log_text contains "Audio: " and folder of item_info is false and this_filetype is not "mp3" then
+				if Log_text contains "Video:" then Show_drawer()
+				if this_filetype is "wma" then set Bandera to true
+				set draget to draget & (num as file specification)
+				set Contenido to true
+			else
+				if this_filetype is in extension_list then
+					«event panSdlog» (num as string) & "
+-Unknown format / Corrupt" given «class attT»:window "main"
+				end if
+			end if
+		end repeat
+		
+		if Bandera is true and wma_advice is false then
+			«event panSdisP» window "wma_advertice" given «class attT»:window "main"
+			set wma_advice to true
+		end if
+		
+		if Contenido is true then
+			if visible of «class imaV» "Drop_here" of window "main" is true then
+				set visible of «class imaV» "Drop_here" of window "main" to false
+			end if
+			CargaDatos(draget, theDataSource)
+		end if
+	end if
+	
+	if name of theObject is "but_trans" then
+		set Indicador_1 to «class conT» of «class texF» "Texto_work_1" of window "main"
+		set Indicador_2 to «class conT» of «class texF» "Texto_work_2" of window "main"
+		set Indicador_3 to «class conT» of «class texF» "Texto_work_3" of window "main"
+		
+		set «class indR» of «class proI» "Timer_2" of window "main" to false
+		set «class maxV» of «class proI» "Timer_2" of window "main" to (count of Paths) * 100
+		«event coVSstaA» «class proI» "Timer_2" of window "main"
+		
+		if Hide_Drawer() then delay 0.5
+		
+		Ord_Data()
+		working()
+		set go_work to true
+	end if
+	
+	if name of theObject is "Mail_to" then
+		try
+			set mi_mail to "tresrrr@gmail.com" as string
+			tell application "Mail"
+				set newMessage to make new outgoing message
+				tell application "Finder"
+					set version_ to get version of current application
+				end tell
+				tell newMessage
+					set visible to true
+					make new to recipient at end of to recipients with properties {name:"TresRRR", address:mi_mail}
+					set the subject to "All2MP3 " & (version_ as string)
+				end tell
+			end tell
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1610 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	return true
+end «event coVScliI»
+
+--Control de manipulacion de selectores-----------------------------------------------
+
+on «event coVSactT» theObject
+	if name of theObject is equal to "slider_calidad_1" then
+		try
+			set calidad to «class intV» of theObject
+			if calidad is 0 then
+				set Scali to "160"
+			else if calidad is 33 then
+				set Scali to "192"
+			else if calidad is 66 then
+				set Scali to "256"
+			else if calidad is 100 then
+				set Scali to "320"
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1100 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	if name of theObject is equal to "slider_calidad_2" then
+		try
+			set calidad to «class intV» of theObject
+			if calidad is 1 then
+				set Scali to "32"
+			else if calidad is 2 then
+				set Scali to "40"
+			else if calidad is 3 then
+				set Scali to "48"
+			else if calidad is 4 then
+				set Scali to "56"
+			else if calidad is 5 then
+				set Scali to "64"
+			else if calidad is 6 then
+				set Scali to "80"
+			else if calidad is 7 then
+				set Scali to "96"
+			else if calidad is 8 then
+				set Scali to "112"
+			else if calidad is 9 then
+				set Scali to "128"
+			else if calidad is 10 then
+				set Scali to "160"
+			else if calidad is 11 then
+				set Scali to "192"
+			else if calidad is 12 then
+				set Scali to "224"
+			else if calidad is 13 then
+				set Scali to "256"
+			else if calidad is 14 then
+				set Scali to "320"
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1110 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	return true
+end «event coVSactT»
+
+--Funcion de distribucion de trabajo---------------------------------------------
+
+on working()
+	try
+		set num_rest_trab to (the (count of Paths) - num_trans)
+		set the_item to item num_trans of Paths as string
+		set AppleScript's text item delimiters to "|"
+		set this_item to the first text item of the_item
+		set this_path to the second text item of the_item
+		set this_item to cambia_caracter(this_item, "/", ":")
+		set this_path to cambia_caracter(this_path, "/", ":")
+		
+		set «class conT» of «class proI» "Timer_1" of window "main" to 0
+		set «class indR» of «class proI» "Timer_1" of window "main" to true
+		«event coVSstaA» «class proI» "Timer_1" of window "main"
+		
+		set AppleScript's text item delimiters to "."
+		set fileExtension to the last text item of (this_item as string)
+		set AppleScript's text item delimiters to "/"
+		set Nombre to the last text item of (this_item as string)
+		
+		if Control_Permisos(this_path) then
+			set «class maxV» of «class proI» "Timer_1" of window "main" to 100
+			
+			Window_Size("work")
+			ffmpeg(this_item, this_path)
+			
+			set num_trans to num_trans + 1
+		end if
+	on error el_error
+		if Conmprueba_existencia(this_item) then set num_trans to num_trans + 1
+	end try
+	
+	return true
+end working
+
+--Funcion de archivos ----------------------------------------------------------
+
+on ffmpeg(this_item, this_path)
+	set AppleScript's text item delimiters to ":"
+	set Nombre to the last text item of this_item
+	set AppleScript's text item delimiters to "."
+	set ext to the last text item of Nombre
+	
+	
+	set Mi_salida to unixpath(Control_existe(POSIX path of (this_path as string) & cambia_caracter(Nombre, "." & ext, ".mp3")))
+	
+	set this_item to unixpath(POSIX path of this_item)
+	
+	Display_work(this_item)
+	
+	
+	do shell script ffmpeg_ & " -i" & " " & this_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+	set Log_text to result
+	
+	--------DURACION--------
+	if Log_text contains "Duration: N/A" then
+		set segundos_total to "NA"
+	else
+		set AppleScript's text item delimiters to "Duration: "
+		set duration to the last text item of Log_text
+		set AppleScript's text item delimiters to ", "
+		set duration to the first text item of duration
+		set AppleScript's text item delimiters to ":"
+		
+		set Hor to (text item 1 of duration) as integer
+		set min to (text item 2 of duration) as integer
+		set seg to (text item 3 of duration)
+		
+		if text item 3 of duration contains "." then
+			set AppleScript's text item delimiters to "."
+			set seg to (the first text item of seg) as integer
+		else
+			set seg to seg as integer
+		end if
+		
+		set segundos_total to ((Hor * 60) * 60) + (min * 60) + seg
+	end if
+	
+	if Log_text contains "Stream #0.0: Video:" then
+		if Log_text contains "Stream #0.1: Audio:" then
+			set AppleScript's text item delimiters to "Stream #0.1: Audio: "
+			set tipo to (the last text item of Log_text)
+			set Hz to tipo
+			set canal to tipo
+			set AppleScript's text item delimiters to ", "
+			set tipo to (the first text item of tipo)
+			set AppleScript's text item delimiters to " Hz,"
+			set Hz to (the first text item of Hz)
+			set AppleScript's text item delimiters to tipo & ", "
+			set Hz to (the last text item of Hz) as integer
+			
+			if canal contains "stereo" then
+				set canal to 2
+			else
+				set AppleScript's text item delimiters to " channels"
+				set canal to (the first text item of canal)
+				set AppleScript's text item delimiters to "Hz, "
+				set canal to (the last text item of canal)
+			end if
+			
+			if tipo is "mp3" then
+				do shell script ffmpeg_ & " -i " & this_item & " -vn -ar " & Hz & " -ac " & canal & " -acodec copy " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+			else
+				if Hz ≤ 22050 then
+					set Hz to 44100
+				end if
+				
+				if Log_text contains "channels" then
+					do shell script ffmpeg_ & " -i " & this_item & " -vn -ar " & Hz & " -ac " & canal & " -ab " & Scali & "k " & " -f mp3 " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+				else
+					if canal contains "5.1" then
+						do shell script ffmpeg_ & " -i " & this_item & " -vn -ab " & Scali & "k " & " -ac 2 -f mp3 " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+					else
+						do shell script ffmpeg_ & " -i " & this_item & " -vn -ar " & Hz & " -ab " & Scali & "k " & " -f mp3 " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+					end if
+				end if
+			end if
+		else
+			«event panSdlog» "No Audio content found on " & Nombre given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end if
+	else
+		----------------"1 channels" Coge los KB/S de la entrada----------------
+		if Log_text contains "1 channels" then
+			do shell script ffmpeg_ & " -i" & " " & this_item & " -map_meta_data " & Mi_salida & ":" & this_item & " -ac 1 " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+		else
+			----------------"Normal"----------------
+			do shell script ffmpeg_ & " -i" & " " & this_item & " -map_meta_data " & Mi_salida & ":" & this_item & " -ab " & Scali & "k " & Mi_salida & " >& " & log_file & " &" & " &> /dev/null &"
+		end if
+	end if
+	
+	set Cancion_a_trans to (un_unixpath(Mi_salida) as POSIX file) as string
+end ffmpeg
+
+--Funcion de modificacion de Ventana ------------------------------------------------
+
+on Window_Size(modo)
+	if modo is "max" then
+		try
+			set visible of «class imaV» "Drop_here" of window "main" to false
+			set visible of «class butT» "But_Fondo" of window "main" to false
+			set visible of «class texF» "Texto_front" of window "main" to false
+			set visible of «class butT» "but_add_front" of window "main" to false
+			set visible of «class butT» "but_cancel" of window "main" to false
+			
+			set visible of «class scrV» "files" of window "main" to false
+			
+			set visible of «class boxO» "Box_Content" of window "main" to false
+			
+			set visible of «class proI» "Timer_1" of window "main" to false
+			set visible of «class proI» "Timer_2" of window "main" to false
+			set visible of «class texF» "Total_pro" of window "main" to false
+			
+			set tabla to «class tabW» "files" of «class scrV» "files" of window "main"
+			
+			set ArrowImageIndex to 1
+			set ArrowImageList to {loadImage("NSAscendingSortIndicator"), loadImage("NSDescendingSortIndicator")}
+			«event appScalM» "setIndicatorImage:inTableColumn:" given «class psof»:tabla, «class witP»:{item ArrowImageIndex of ArrowImageList, «class tabC» 2 of tabla}
+			
+			set {x, y} to size of window "main"
+			
+			set the_Width to (max_Letras_files + max_Letras_path + 30)
+			
+			if the_Width > 950 then
+				set the_Width to 950
+			else
+				if the_Width < 635 then
+					set the_Width to 635
+				end if
+			end if
+			
+			set the_height to (((count of Paths) + 1) * 19)
+			
+			if the_height > 600 then
+				set the_height to 600
+			end if
+			
+			set {x_BC, y_BC} to size of «class boxO» "Box_Content" of window "main"
+			
+			if the_Width < 950 then
+				if the_Width < 635 then
+					«event appScalM» "resizeWindow:toHeight:toWidth:" given «class of C»:"CocoaUtilities", «class witP»:{window "main", (the_height + (y_BC - 19)), 635}
+				else
+					«event appScalM» "resizeWindow:toHeight:toWidth:" given «class of C»:"CocoaUtilities", «class witP»:{window "main", (the_height + (y_BC - 19)), the_Width}
+				end if
+			else
+				«event appScalM» "resizeWindow:toHeight:toWidth:" given «class of C»:"CocoaUtilities", «class witP»:{window "main", (the_height + (y_BC - 19)), 950}
+			end if
+			
+			set size of «class scrV» "files" of window "main" to {the_Width, the_height}
+			set size of «class boxO» "Box_Content" of window "main" to {the_Width + 6, y_BC}
+			
+			set {x, y} to size of window "main"
+			
+			tell tabla
+				set «class widD» of «class tabC» "columna_file" to max_Letras_files
+				set «class widD» of «class tabC» "columna_path" to max_Letras_path
+			end tell
+			
+			set {x_2, y_2} to size of «class scrV» "files" of window "main"
+			set «class posn» of «class scrV» "files" of window "main" to {0, y - (y_2 + 21)}
+			
+			set {x_T, y_T} to «class posn» of «class scrV» "files" of window "main"
+			
+			set «class posn» of «class boxO» "Box_Content" of window "main" to {-3, -3}
+			
+			set size of «class view» "Zona_drop" of window "main" to {x, y}
+			set «class posn» of «class view» "Zona_drop" of window "main" to {0, y - 2 - (y)}
+			
+			set «class posn» of «class butT» "Sel_All_Path" of «class boxO» "Box_Content" of window "main" to {2, y - y_2 - 37}
+			set «class posn» of «class texF» "Sel_All_Path_text" of «class boxO» "Box_Content" of window "main" to {22, y - y_2 - 36}
+			
+			set {x_2, y_2} to size of «class butT» "check_trash" of «class boxO» "Box_Content" of window "main"
+			set «class posn» of «class butT» "check_trash" of «class boxO» "Box_Content" of window "main" to {x - (x_2 + 12), 42}
+			
+			set {x_2, y_2} to size of «class butT» "but_trans" of «class boxO» "Box_Content" of window "main"
+			set «class posn» of «class butT» "but_trans" of «class boxO» "Box_Content" of window "main" to {x - (x_2 + 12), 10}
+			
+			
+			set {x_3, y_3} to size of «class butT» "but_add" of «class boxO» "Box_Content" of window "main"
+			set «class posn» of «class butT» "but_add" of «class boxO» "Box_Content" of window "main" to {x - ((x_2 + x_3) + 24), 10}
+			
+			set «class posn» of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main" to {x - (x - 5), 5}
+			set «class posn» of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main" to {x - (x - 5), 5}
+			
+			set visible of «class scrV» "files" of window "main" to true
+			
+			set visible of «class boxO» "Box_Content" of window "main" to true
+			
+			if stado_Q is "min" then
+				set {x, y} to size of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main"
+				set «class posn» of «class butT» "but_reset" of «class boxO» "Box_Content" of window "main" to {x + 15, 10}
+				
+				set visible of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main" to true
+			else
+				set {x, y} to size of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main"
+				set «class posn» of «class butT» "but_reset" of «class boxO» "Box_Content" of window "main" to {x + 15, 10}
+				
+				set visible of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main" to true
+			end if
+			
+			set «class allR» of «class tabW» "files" of «class scrV» "files" of window "main" to true
+		on error el_error
+			«event panSdlog» "ERROR CODE: 700 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	if modo is "min" then
+		try
+			«event coVSstoT» «class proI» "Timer_1" of window "main"
+			«event coVSstoT» «class proI» "Timer_2" of window "main"
+			
+			set visible of «class scrV» "files" of window "main" to false
+			set visible of «class butT» "but_cancel" of window "main" to false
+			
+			set visible of «class boxO» "Box_Content" of window "main" to false
+			
+			set visible of «class texF» "Texto_work_1" of window "main" to false
+			set visible of «class texF» "Texto_work_2" of window "main" to false
+			set visible of «class texF» "Texto_work_3" of window "main" to false
+			set visible of «class proI» "Timer_1" of window "main" to false
+			set visible of «class proI» "Timer_2" of window "main" to false
+			set visible of «class texF» "Total_pro" of window "main" to false
+			
+			if Cancelando then
+				set visible of «class imaV» "Cancelando" of window "main" to false
+				set Cancelando to false
+			else
+				set visible of «class imaV» "working" of window "main" to false
+			end if
+			
+			«event appScalM» "resizeWindow:toHeight:toWidth:" given «class of C»:"CocoaUtilities", «class witP»:{window "main", 294, 404}
+			
+			set visible of «class butT» "But_Fondo" of window "main" to true
+			set visible of «class texF» "Texto_front" of window "main" to true
+			set visible of «class imaV» "Drop_here" of window "main" to true
+			set visible of «class butT» "but_add_front" of window "main" to true
+			
+			set calidad to «class intV» of «class sliI» "slider_calidad_1" of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main"
+			if calidad is 0 then
+				set Scali to "160"
+			else if calidad is 33 then
+				set Scali to "192"
+			else if calidad is 66 then
+				set Scali to "256"
+			else if calidad is 100 then
+				set Scali to "320"
+			end if
+			
+			set {x, y} to size of «class butT» "But_Fondo" of window "main"
+			
+			set {x_2, y_2} to «class posn» of «class butT» "But_Fondo" of window "main"
+			
+			set size of «class view» "Zona_drop" of window "main" to {x, y}
+			set «class posn» of «class view» "Zona_drop" of window "main" to {x_2, y_2}
+		on error el_error
+			«event panSdlog» "ERROR CODE: 710 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	if modo is "work" then
+		try
+			set visible of «class scrV» "files" of window "main" to false
+			set visible of «class boxO» "Box_Content" of window "main" to false
+			
+			«event appScalM» "resizeWindow:toHeight:toWidth:" given «class of C»:"CocoaUtilities", «class witP»:{window "main", 294, 404}
+			
+			set visible of «class butT» "But_Fondo" of window "main" to true
+			set visible of «class imaV» "working" of window "main" to true
+			set visible of «class butT» "but_cancel" of window "main" to true
+			set visible of «class texF» "Total_pro" of window "main" to true
+			set visible of «class proI» "Timer_1" of window "main" to true
+			set visible of «class proI» "Timer_2" of window "main" to true
+		on error el_error
+			«event panSdlog» "ERROR CODE: 720 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	return true
+end Window_Size
+
+--Funcion de informacion en pantalla -------------------------------------------------
+
+on Display_work(Mi_WAV)
+	try
+		set Mi_WAV to (POSIX path of un_unixpath(Mi_WAV)) as string
+		set AppleScript's text item delimiters to "."
+		set ext to the last text item of Mi_WAV
+		
+		if ext is equal to "ape'" or ext is equal to "ape" then set ext to "APE"
+		if ext is equal to "mpc'" or ext is equal to "mpc" then set ext to "MPC"
+		if ext is equal to "flac'" or ext is equal to "flac" then set ext to "FLAC"
+		if ext is equal to "wv'" or ext is equal to "wv" then set ext to "WV"
+		if ext is equal to "wma'" or ext is equal to "wma" then set ext to "WMA"
+		if ext is equal to "ogg'" or ext is equal to "ogg" then set ext to "OGG"
+		if ext is equal to "aiff'" or ext is equal to "aiff" or ext is equal to "aif'" or ext is equal to "aif" then set ext to "AIF"
+		if ext is equal to "wav'" or ext is equal to "wav" then set ext to "WAV"
+		if ext is equal to "mp3'" or ext is equal to "mp3" then set ext to "MP3"
+		
+		set AppleScript's text item delimiters to "/"
+		set Nombre to the last text item of Mi_WAV
+		set «class conT» of «class texF» "Texto_work_1" of window "main" to " "
+		set «class conT» of «class texF» "Texto_work_1" of window "main" to Indicador_1 & ext & " - MP3"
+		
+		if (count of cambia_caracter(Nombre, "'", "")) > 200 then
+			set {w, h} to size of «class texF» "Texto_work_2" of window "main"
+			if h < 49 then
+				set size of «class texF» "Texto_work_2" of window "main" to {w, h + 20}
+				set «class conT» of «class texF» "Texto_work_2" of window "main" to " "
+				set «class conT» of «class texF» "Texto_work_2" of window "main" to Indicador_2 & cambia_caracter(Nombre, "'", "")
+			end if
+		else
+			set size of «class texF» "Texto_work_2" of window "main" to {351, 29}
+			set «class conT» of «class texF» "Texto_work_2" of window "main" to " "
+			set «class conT» of «class texF» "Texto_work_2" of window "main" to Indicador_2 & cambia_caracter(Nombre, "'", "")
+		end if
+		
+		if num_rest_trab > 0 then
+			set «class conT» of «class texF» "Texto_work_3" of window "main" to " "
+			set «class conT» of «class texF» "Texto_work_3" of window "main" to Indicador_3 & num_rest_trab & " - " & the (count of Paths)
+		else
+			set «class conT» of «class texF» "Texto_work_3" of window "main" to " "
+			set «class conT» of «class texF» "Texto_work_3" of window "main" to Indicador_3 & "0"
+		end if
+		
+		set visible of «class texF» "Texto_work_1" of window "main" to true
+		set visible of «class texF» "Texto_work_2" of window "main" to true
+		set visible of «class texF» "Texto_work_3" of window "main" to true
+	end try
+	return true
+end Display_work
+
+--Funcion de Reset ---------------------------------------------------------------------
+
+on Reseteame()
+	try
+		if Hide_Drawer() then delay 0.5
+		
+		tell window "main"
+			set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files"
+			delete every «class datR» of theDataSource
+			tell «class tabW» "files" of «class scrV» "files" to «event appSfupd»
+		end tell
+		
+		set «class staB» of «class butT» "check_trash" of «class boxO» "Box_Content" of window "main" to false
+		
+		set «class indR» of «class proI» "Timer_1" of window "main" to true
+		set «class indR» of «class proI» "Timer_2" of window "main" to true
+		
+		set «class conT» of «class proI» "Timer_1" of window "main" to 0
+		set «class conT» of «class proI» "Timer_2" of window "main" to 0
+		
+		set «class conT» of «class texF» "Texto_work_1" of window "main" to Indicador_1
+		set «class conT» of «class texF» "Texto_work_2" of window "main" to Indicador_2
+		set «class conT» of «class texF» "Texto_work_3" of window "main" to Indicador_3
+		
+		set Paths to {} as list
+		
+		set porcentage_total to 0
+		
+		set Borrando to false
+		set no_borrar to true
+		set go_work to false
+		
+		set Row_Drag to false
+		
+		set counter to 0
+		set num_trans to 1
+		set max_Letras_files to 0
+		set max_Letras_path to 0
+		set mp3splt_no to false
+		set segundos_total to ""
+		
+		set app_working to ""
+		set Mi_WAV to ""
+		set Cancion_a_trans to ""
+		set this_item to ""
+		set this_path to ""
+		set targetDataRow to ""
+		
+		if visible of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main" is true then
+			set calidad to «class intV» of «class sliI» "slider_calidad_1" of «class boxO» "quality_box_1" of «class boxO» "Box_Content" of window "main"
+			if calidad is 0 then
+				set Scali to "160"
+			else if calidad is 33 then
+				set Scali to "192"
+			else if calidad is 66 then
+				set Scali to "256"
+			else if calidad is 100 then
+				set Scali to "320"
+			end if
+		else
+			set calidad to «class intV» of «class sliI» "slider_calidad_2" of «class boxO» "quality_box_2" of «class boxO» "Box_Content" of window "main"
+			if calidad is 1 then
+				set Scali to "32"
+			else if calidad is 2 then
+				set Scali to "40"
+			else if calidad is 3 then
+				set Scali to "48"
+			else if calidad is 4 then
+				set Scali to "56"
+			else if calidad is 5 then
+				set Scali to "64"
+			else if calidad is 6 then
+				set Scali to "80"
+			else if calidad is 7 then
+				set Scali to "96"
+			else if calidad is 8 then
+				set Scali to "112"
+			else if calidad is 9 then
+				set Scali to "128"
+			else if calidad is 10 then
+				set Scali to "160"
+			else if calidad is 11 then
+				set Scali to "192"
+			else if calidad is 12 then
+				set Scali to "224"
+			else if calidad is 13 then
+				set Scali to "256"
+			else if calidad is 14 then
+				set Scali to "320"
+			end if
+		end if
+	on error el_error
+		«event panSdlog» "ERROR CODE: 1400 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+	
+	Window_Size("min")
+	
+	return true
+end Reseteame
+
+--Funcion para "quotet files" -----------------------------------------------------
+
+on getQuotedForm(string_)
+	return quoted form of string_
+end getQuotedForm
+
+on unixpath(string_)
+	
+	set string_ to cambia_caracter(string_, " ", (ASCII character (92)) & " ")
+	set string_ to cambia_caracter(string_, "ª", (ASCII character (92)) & "ª")
+	set string_ to cambia_caracter(string_, "!", (ASCII character (92)) & "!")
+	set string_ to cambia_caracter(string_, ASCII character (34), (ASCII character (92)) & (ASCII character (34)))
+	set string_ to cambia_caracter(string_, "·", (ASCII character (92)) & "·")
+	set string_ to cambia_caracter(string_, "$", (ASCII character (92)) & "$")
+	set string_ to cambia_caracter(string_, "%", (ASCII character (92)) & "%")
+	set string_ to cambia_caracter(string_, "&", (ASCII character (92)) & "&")
+	set string_ to cambia_caracter(string_, "(", (ASCII character (92)) & "(")
+	set string_ to cambia_caracter(string_, ")", (ASCII character (92)) & ")")
+	set string_ to cambia_caracter(string_, "=", (ASCII character (92)) & "=")
+	set string_ to cambia_caracter(string_, "?", (ASCII character (92)) & "?")
+	set string_ to cambia_caracter(string_, "¿", (ASCII character (92)) & "¿")
+	set string_ to cambia_caracter(string_, "º", (ASCII character (92)) & "º")
+	set string_ to cambia_caracter(string_, "'", (ASCII character (92)) & "'")
+	set string_ to cambia_caracter(string_, "¡", (ASCII character (92)) & "¡")
+	set string_ to cambia_caracter(string_, "^", (ASCII character (92)) & "^")
+	set string_ to cambia_caracter(string_, "*", (ASCII character (92)) & "*")
+	set string_ to cambia_caracter(string_, "`", (ASCII character (92)) & "`")
+	set string_ to cambia_caracter(string_, "+", (ASCII character (92)) & "+")
+	set string_ to cambia_caracter(string_, "[", (ASCII character (92)) & "[")
+	set string_ to cambia_caracter(string_, "]", (ASCII character (92)) & "]")
+	set string_ to cambia_caracter(string_, "}", (ASCII character (92)) & "}")
+	set string_ to cambia_caracter(string_, ",", (ASCII character (92)) & ",")
+	--set string_ to cambia_caracter(string_, ".", (ASCII character (92)) & ".")
+	set string_ to cambia_caracter(string_, ";", (ASCII character (92)) & ";")
+	set string_ to cambia_caracter(string_, ":", (ASCII character (92)) & ":")
+	set string_ to cambia_caracter(string_, "_", (ASCII character (92)) & "_")
+	set string_ to cambia_caracter(string_, "|", (ASCII character (92)) & "|")
+	set string_ to cambia_caracter(string_, "@", (ASCII character (92)) & "@")
+	set string_ to cambia_caracter(string_, "#", (ASCII character (92)) & "#")
+	set string_ to cambia_caracter(string_, "¢", (ASCII character (92)) & "¢")
+	set string_ to cambia_caracter(string_, "∞", (ASCII character (92)) & "∞")
+	set string_ to cambia_caracter(string_, "¬", (ASCII character (92)) & "¬")
+	set string_ to cambia_caracter(string_, "÷", (ASCII character (92)) & "÷")
+	set string_ to cambia_caracter(string_, "“", (ASCII character (92)) & "“")
+	set string_ to cambia_caracter(string_, "≠", (ASCII character (92)) & "≠")
+	set string_ to cambia_caracter(string_, "~", (ASCII character (92)) & "~")
+	set string_ to cambia_caracter(string_, "<", (ASCII character (92)) & "<")
+	set string_ to cambia_caracter(string_, ">", (ASCII character (92)) & ">")
+	
+	return string_
+end unixpath
+
+on un_unixpath(string_)
+	
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & " ", " ")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "ª", "ª")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "!", "!")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & (ASCII character (34)), ASCII character (34))
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "·", "·")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "$", "$")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "%", "%")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "&", "&")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "(", "(")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & ")", ")")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "=", "=")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "?", "?")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "¿", "¿")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "º", "º")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "'", "'")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "¡", "¡")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "^", "^")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "*", "*")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "`", "`")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "+", "+")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "[", "[")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "]", "]")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "}", "}")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & ",", ",")
+	--set string_ to cambia_caracter(string_, (ASCII character (92)) & ".", ".")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & ";", ";")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & ":", ":")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "_", "_")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "|", "|")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "@", "@")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "#", "#")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "¢", "¢")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "∞", "∞")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "¬", "¬")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "÷", "÷")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "“", "“")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "≠", "≠")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "~", "~")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & "<", "<")
+	set string_ to cambia_caracter(string_, (ASCII character (92)) & ">", ">")
+	
+	return string_
+end un_unixpath
+
+--Funcion de Borrado de archivos transformados ----------------------------------------
+
+on Borrar(these_items)
+	try
+		repeat with num in these_items
+			set AppleScript's text item delimiters to "|"
+			set this_item to the first text item of num
+			set this_item to (cambia_caracter(this_item as string, "/", ":") as alias)
+			
+			tell application "Finder"
+				delete this_item
+			end tell
+		end repeat
+		Reseteame()
+	end try
+	return true
+end Borrar
+
+--Funcion de control de archivos existentes ---------------------------------------------
+
+on Control_existe(cancion)
+	try
+		set AppleScript's text item delimiters to "."
+		set Extension to the last text item of (cancion as string)
+		
+		set Bandera to true
+		set num to 0
+		
+		repeat until Bandera is false
+			set AppleScript's text item delimiters to "/"
+			
+			set nombre_ to (last text item of cancion) as string
+			
+			set max_items to number of text items of ((POSIX path of cancion) as string) as integer
+			set ruta_C to cambia_caracter(cancion, nombre_, "")
+			
+			set prog to do shell script "ls " & quoted form of (ruta_C)
+			
+			if prog contains nombre_ then
+				set Bandera to true
+				set num to num + 1
+			else
+				set Bandera to false
+			end if
+			
+			if Bandera is true then
+				set cuenta_letras to (count of (cancion as string))
+				
+				if (count of Extension) is 4 then
+					if character (cuenta_letras - 5) of (cancion as string) is "~TEMP" then
+						set cancion to cambia_caracter(cancion, "." & Extension, "") & "_" & num & "." & Extension as string
+					else
+						set cancion to cambia_caracter(cancion, "_" & num & "." & Extension, "") & "_" & num & "." & Extension as string
+					end if
+				else
+					if character (cuenta_letras - 4) of (cancion as string) is "~TEMP" then
+						if character (cuenta_letras - 6) of (cancion as string) is "_" then
+							set cancion to cambia_caracter(cancion, (character (cuenta_letras - 5)) & "." & Extension, "") & num & "." & Extension as string
+						else
+							set cancion to cambia_caracter(cancion, "." & Extension, "") & "_" & num & "." & Extension as string
+						end if
+					else
+						if character (cuenta_letras - 5) of (cancion as string) is "_" then
+							set cancion to cambia_caracter(cancion, character (cuenta_letras - 4) of (cancion as string) & "." & Extension, "") & num & "." & Extension as string
+						else
+							set cancion to cambia_caracter(cancion, "." & Extension, "") & "_" & num & "." & Extension as string
+						end if
+					end if
+				end if
+			end if
+		end repeat
+		
+		return POSIX path of cancion
+		
+	on error el_error
+		«event panSdlog» "ERROR CODE: 1500 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+	end try
+end Control_existe
+
+--Funcion de cambio de caracteres en el titulo --------------------------------------------------------------------------------
+
+on cambia_caracter(this_text, search_string, replacement_string)
+	set this_text to this_text as string
+	set AppleScript's text item delimiters to the search_string
+	set the item_list to every text item of this_text
+	set AppleScript's text item delimiters to the replacement_string
+	set this_text to the item_list as string
+	set AppleScript's text item delimiters to ""
+	return this_text
+end cambia_caracter
+
+--Control de apagado -----------------------------------------------------------------
+on «event appSwilC» theObject
+	if go_work is true then
+		set Cancelando to true
+	end if
+	quit
+end «event appSwilC»
+
+--Control de menus---------------------------------------------------------------------
+
+on «event menSchMI» theObject
+	if name of theObject is "Desinstall_" then
+		set «class conT» of «class texF» "Ruta_all2mp3" of window "Desinstall_" to "1 - " & (POSIX path of (path to me) as string)
+		set «class conT» of «class texF» "Ruta_preferences" of window "Desinstall_" to "3 - " & (POSIX path of (path to current user folder) as string) & "Library/Preferences/com.Tresrrr.All2MP3.plist"
+		
+		«event panSdisP» window "Desinstall_" given «class attT»:window "main"
+	end if
+	
+	if name of theObject is "Env_Report" then
+		tell application "Finder"
+			set version_ to get version of current application
+		end tell
+		
+		tell window "report_pan"
+			set «class conT» of «class texF» "Sys_ver" to (system version of (system info))
+			if (system attribute "sysa") is 10 then
+				set «class conT» of «class texF» "CPU_ver" to "Intel"
+			else if (system attribute "sysa") is 2 then
+				set «class conT» of «class texF» "CPU_ver" to "PPC"
+			end if
+			set «class conT» of «class texV» "Log_" of «class scrV» "Log_" to do shell script ("cat " & log_file) as string
+		end tell
+		«event panSdisP» window "report_pan" given «class attT»:window "main"
+	end if
+	
+	if name of theObject is "log_menu" then
+		set log_ to (((path to me) as string) & "Contents:Resources:All2MP3.log")
+		tell application "Console"
+			open file log_
+		end tell
+	end if
+	
+	if name of theObject is "Donate" then
+		set PayPal to "https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&hosted_button_id=4262037&business=TresRRR%40gmail%2ecom&item_name=Donation%20for%20All2MP3&no_shipping=1&no_note=1&tax=0&currency_code=EUR"
+		tell application "Finder"
+			open location PayPal
+		end tell
+	end if
+	
+	if name of theObject is "m_extract" then
+		set contenidos to (choose file with multiple selections allowed without invisibles)
+		try
+			set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "Main"
+			set «class updV» of theDataSource to false
+			
+			set draget to {}
+			
+			if contenidos is not "" then
+				repeat with num in the contenidos
+					set item_info to info for num
+					if folder of item_info is false then
+						set draget to draget & (num as file specification)
+					end if
+				end repeat
+			end if
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1600 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+		if contenidos is not "" then
+			CargaDatos(draget, theDataSource)
+		end if
+	end if
+	
+	if name of theObject is "m_open" then
+		set contenidos to (choose file with multiple selections allowed without invisibles)
+		try
+			set theDataSource to «class datS» of «class tabW» "files" of «class scrV» "files" of window "Main"
+			set «class updV» of theDataSource to false
+			
+			set Contenido to false
+			set Bandera to false
+			set draget to {}
+			
+			if contenidos is not "" then
+				repeat with num in the contenidos
+					set the_iteminfo to info for num
+					set the_item to num as string
+					
+					set AppleScript's text item delimiters to "."
+					set this_filetype to the last text item of the_item
+					
+					set the_item to unixpath(POSIX path of the_item)
+					do shell script ffmpeg_ & " -i" & " " & the_item & " null 2>&1 | sed -n '/^Input /,/^Stream /p' | sed '$d'"
+					set Log_text to result
+					
+					if Log_text contains "Audio: " and folder of the_iteminfo is false and this_filetype is not "mp3" then
+						if Log_text contains "Video:" then Show_drawer()
+						if this_filetype is "wma" then set Bandera to true
+						set draget to draget & (num as file specification)
+						set Contenido to true
+					else
+						if this_filetype is in extension_list then
+							«event panSdlog» (num as string) & "
+-Unknown format / Corrupt" given «class attT»:window "main"
+						end if
+					end if
+				end repeat
+			end if
+			
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1600 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+		if Bandera is true and wma_advice is false then
+			«event panSdisP» window "wma_advertice" given «class attT»:window "main"
+			set wma_advice to true
+		end if
+		
+		if Contenido is true then
+			if visible of «class imaV» "Drop_here" of window "main" is true then
+				set visible of «class imaV» "Drop_here" of window "main" to false
+			end if
+			CargaDatos(draget, theDataSource)
+		end if
+	end if
+	
+	if the name of theObject is "m_Contact" then
+		try
+			set mi_mail to "tresrrr@gmail.com" as string
+			tell application "Mail"
+				set newMessage to make new outgoing message
+				tell application "Finder"
+					set version_ to get version of current application
+				end tell
+				tell newMessage
+					set visible to true
+					make new to recipient at end of to recipients with properties {name:"TresRRR", address:mi_mail}
+					set the subject to "All2MP3 " & (version_ as string)
+				end tell
+			end tell
+		on error el_error
+			«event panSdlog» "ERROR CODE: 1610 -> " & el_error given «class btns»:["OK"], «class dflt»:1, «class attT»:window "main"
+		end try
+	end if
+	
+	if the name of theObject is "Acerca_de" then
+		«event appSshoH» window "Acerca_de"
+	end if
+	
+	return true
+end «event menSchMI»
+
+--Control de posicion Panel About --------------------------------------------------------
+
+on «event appSwilO» theObject
+	if name of theObject is "acerca_de" then
+		set info_ to getQuotedForm((POSIX path of (path to me) as string) & "Contents/info") as string
+		
+		do shell script "defaults read " & info_ & " CFBundleShortVersionString"
+		set Short_ to result
+		do shell script "defaults read " & info_ & " CFBundleVersion"
+		set Long_ to result
+		
+		set {x, y} to «class posn» of window "main"
+		set «class posn» of window "acerca_de" to {x, y}
+		
+		set «class conT» of «class texF» "Version_" of window "acerca_de" to (Short_ as string) & " (" & (Long_ as string) & ")"
+	end if
+end «event appSwilO»
+
+--Carga de image. triangulo cabecera listado-------------------------------------------------------
+
+on loadImage(Imagename)
+	if (every «class imaA» whose name is Imagename) is {} then
+		set myimage to «event appSloaI» Imagename
+		set name of myimage to Imagename
+	else
+		set myimage to «class imaA» Imagename
+	end if
+	return myimage
+end loadImage
+
+--Control de exito en conversion------------------------------------------------------------
+
+on Conmprueba_existencia(cancion)
+	set cancion to POSIX path of cancion
+	set AppleScript's text item delimiters to "/"
+	set nombre_ to (last text item of cancion) as string
+	set max_items to number of text items of ((POSIX path of cancion) as string) as integer
+	set ruta_C to cambia_caracter(cancion, nombre_, "")
+	set AppleScript's text item delimiters to "."
+	set exten to last text item of nombre_
+	set nombre_ to cambia_caracter(nombre_, exten, "mp3")
+	
+	try
+		set prog to do shell script "ls " & quoted form of (ruta_C)
+	on error
+		return false
+	end try
+	
+	if prog contains nombre_ then
+		return true
+	else
+		return false
+	end if
+end Conmprueba_existencia
+
+--Control de escritura----------------------------------------------------------------------------
+
+on Control_Permisos(thispath)
+	set thispath to ((POSIX path of thispath) as string)
+	set AppleScript's text item delimiters to "/"
+	set max_items to (number of text items of thispath) as integer
+	set Nom_F_thispath to text item (max_items - 1) of thispath
+	set Ruta_Path to cambia_caracter(thispath, "/" & text item (max_items - 1) of thispath & "/", "/")
+	set ruta_C to cambia_caracter(thispath, "/" & text item (max_items) of thispath & "/", "/")
+	
+	try
+		set prog to do shell script Comando_LS & quoted form of Ruta_Path
+	on error el_error
+		set «class conT» of «class texF» "T_permisos" of window "Per_Error" to el_error
+		«event panSdisP» window "Per_error" given «class attT»:window "main"
+		Reseteame()
+		delay 0.5
+		return false
+	end try
+	
+	set AppleScript's text item delimiters to (ASCII character (13))
+	set max_items to (number of text items of prog) as integer
+	
+	repeat with i from 1 to max_items
+		if text item i of prog contains Nom_F_thispath then
+			if text item i of prog contains "uchg" then
+				set «class conT» of «class texF» "T_permisos" of window "Bl_Error" to text item i of prog
+				«event panSdisP» window "Bl_error" given «class attT»:window "main"
+				Reseteame()
+				delay 0.5
+				return false
+			end if
+		end if
+	end repeat
+	
+	
+	set prog to do shell script "stat -f " & (ASCII character (34)) & "%Sp -> owner=%SHp" & (ASCII character (34)) & " " & quoted form of thispath
+	
+	set AppleScript's text item delimiters to "owner="
+	set permiso_Propietario to text 1 thru 3 of (last text item of prog)
+	
+	if permiso_Propietario contains "w" then
+		return true
+	else
+		set «class conT» of «class texF» "T_permisos" of window "Per_Error" to last text item of prog
+		«event panSdisP» window "Per_Error" given «class attT»:window "main"
+		Reseteame()
+		delay 0.5
+		return false
+	end if
+end Control_Permisos
+
+--Control de version de systema------------------------------------------------------------------
+
+on «event appSlauN» theObject
+	if (system version of (system info)) ≥ "10.5" then
+		set Comando_LS to "ls -lO "
+		if (system version of (system info)) < "10.6" then set B_Leopard to true
+	else
+		set B_Tiger to true
+		set Comando_LS to "ls -lo "
+	end if
+end «event appSlauN»
+
+property ASDScriptUniqueIdentifier : "All2MP3.AppleScript"
+
+
+---------------------------------------------------------------------------------------------------- 
+
+
+-- 
